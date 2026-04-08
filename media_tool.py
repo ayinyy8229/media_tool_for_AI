@@ -212,19 +212,50 @@ def process_video(ffmpeg_bin: str, src: Path, dst: Path, target_mb: float, log) 
 
 def convert_mp4_to_gif(src: Path, dst: Path, start_time: float, end_time, log) -> bool:
     """
-    用 moviepy 将 MP4 片段转为 GIF。
-    - 高度固定 320px，宽度等比缩放
-    - 帧率 10 FPS，program='ffmpeg'
+    用 ffmpeg 将 MP4 片段转为 GIF。
+    - 高度固定 320px，宽度等比缩放（scale=-1:320）
+    - 帧率 10 FPS，palette 优化画质
     """
+    ffmpeg_bin = find_ffmpeg()
+    if not ffmpeg_bin:
+        log(f"  [错误] {src.name}: 未找到 ffmpeg")
+        return False
+
+    end_str = f"{end_time}s" if end_time is not None else "结尾"
+    log(f"  [MP4→GIF] {src.name}  截取 {start_time}s ~ {end_str} ...")
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    time_args = ["-ss", str(start_time)]
+    if end_time is not None:
+        time_args += ["-t", str(end_time - start_time)]
+
     try:
-        from moviepy import VideoFileClip
-        end_str = f"{end_time}s" if end_time is not None else "结尾"
-        log(f"  [MP4→GIF] {src.name}  截取 {start_time}s ~ {end_str} ...")
-        clip = VideoFileClip(str(src)).subclipped(start_time, end_time)
-        clip = clip.resized(height=320)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        clip.write_gif(str(dst), fps=10)
-        clip.close()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            palette = str(Path(tmpdir) / "palette.png")
+
+            # Pass 1：生成调色板
+            cmd_pal = [
+                ffmpeg_bin, "-y", *time_args, "-i", str(src),
+                "-vf", "fps=10,scale=-1:320:flags=lanczos,palettegen",
+                palette,
+            ]
+            r1 = subprocess.run(cmd_pal, capture_output=True, timeout=120)
+            if r1.returncode != 0:
+                log(f"  [错误] {src.name}: 生成调色板失败\n{r1.stderr.decode(errors='ignore')[-200:]}")
+                return False
+
+            # Pass 2：合成 GIF
+            cmd_gif = [
+                ffmpeg_bin, "-y", *time_args, "-i", str(src), "-i", palette,
+                "-lavfi", "fps=10,scale=-1:320:flags=lanczos [x]; [x][1:v] paletteuse",
+                str(dst),
+            ]
+            r2 = subprocess.run(cmd_gif, capture_output=True, timeout=300)
+            if r2.returncode != 0:
+                log(f"  [错误] {src.name}: GIF 合成失败\n{r2.stderr.decode(errors='ignore')[-200:]}")
+                return False
+
         actual_kb = dst.stat().st_size / 1024
         log(f"  [MP4→GIF] {src.name} → {dst.name}  ({actual_kb:.0f} KB)")
         return True
