@@ -27,28 +27,48 @@ jobs:
           pip install customtkinter pillow moviepy pyinstaller
 
       - name: 打包单文件 EXE
-        run: >
-          pyinstaller
-          --onefile
-          --windowed
-          --collect-all customtkinter
-          --collect-all moviepy
-          --collect-all imageio
-          --collect-all imageio_ffmpeg
-          --collect-all proglog
-          --hidden-import=PIL._tkinter_finder
-          --hidden-import=tkinter
-          --hidden-import=tkinter.filedialog
-          --hidden-import=tkinter.messagebox
-          --name "媒体批量处理工具"
-          media_tool.py
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --collect-all customtkinter `
+            --collect-all moviepy `
+            --collect-all imageio `
+            --collect-all imageio_ffmpeg `
+            --collect-all proglog `
+            --hidden-import=PIL._tkinter_finder `
+            --hidden-import=tkinter `
+            --hidden-import=tkinter.filedialog `
+            --hidden-import=tkinter.messagebox `
+            --name "media-tool" `
+            media_tool.py
+
+      - name: 验证 EXE 是否生成
+        run: |
+          if (!(Test-Path "dist/media-tool.exe")) {
+            Write-Error "EXE 未生成，打包失败"
+            exit 1
+          }
+          Write-Host "EXE 生成成功，大小：$((Get-Item dist/media-tool.exe).Length / 1MB) MB"
+
+      - name: 上传构建产物（备用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-tool-windows
+          path: dist/media-tool.exe
+          if-no-files-found: error
+
+      - name: 创建 Release 标签
+        run: |
+          git tag -f latest
+          git push origin -f latest
 
       - name: 发布到 GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: 最新版本
-          files: dist/媒体批量处理工具.exe
+          files: dist/media-tool.exe
           body: |
-            Windows 用户直接下载 `媒体批量处理工具.exe` 双击运行，无需安装任何环境。
+            Windows 用户直接下载 `media-tool.exe` 双击运行，无需安装任何环境。
           prerelease: false
